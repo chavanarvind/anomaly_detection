@@ -1,0 +1,10 @@
+Input DataFrame and specify window size.
+Remove low-variance columns.
+Sort data by the timestamp column.
+Extract features using sliding windows.
+Train the Isolation Forest model.
+Predict anomalies in the data.
+Calculate the Silhouette Score using features and anomaly labels.
+Evaluate improvement based on the score.
+Adjust hyperparameters if necessary.
+Generate final anomaly results and display a dynamic graph.
