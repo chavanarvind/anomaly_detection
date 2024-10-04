@@ -1,0 +1,37 @@
+import pandas as pd
+
+def load_and_select_columns(file_path, columns=None, file_type='csv'):
+    """
+    Load a file (CSV or Excel) and return a DataFrame with only the selected columns.
+
+    Parameters:
+    - file_path (str): The path to the file.
+    - columns (list): A list of columns to select. If None, all columns will be selected.
+    - file_type (str): The file type, either 'csv' or 'excel'. Default is 'csv'.
+
+    Returns:
+    - pd.DataFrame: A DataFrame with the selected columns.
+    """
+    try:
+        if file_type == 'csv':
+            df = pd.read_csv(file_path)
+        elif file_type == 'excel':
+            df = pd.read_excel(file_path)
+        else:
+            raise ValueError("Invalid file type. Supported types are 'csv' and 'excel'.")
+        
+        # If columns are provided, select only those columns
+        if columns:
+            df = df[columns]
+
+        return df
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        return None
+
+
+# CSV file
+df = load_and_select_columns('data.csv', columns=['column1', 'column2'], file_type='csv')
+
+# Excel file
+df = load_and_select_columns('data.xlsx', columns=['column1', 'column2'], file_type='excel')
