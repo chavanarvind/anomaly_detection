@@ -1,0 +1,163 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import OneClassSVM
+from sklearn.metrics import silhouette_score
+
+
+def remove_low_variance_columns(df, threshold=0.01, timestamp_col='timestamp'):
+    # Identify columns to calculate variance on, excluding the timestamp column
+    cols_to_check = df.columns[df.columns != timestamp_col]
+    low_variance_cols = df[cols_to_check].columns[df[cols_to_check].var() < threshold]
+
+    print(f"Low variance columns identified for removal: {low_variance_cols.tolist()}")
+
+    # Return the DataFrame without low variance columns, keeping the timestamp column
+    return df.drop(columns=low_variance_cols)
+
+
+def evaluate_isolation_forest_params(X, contamination_range, n_estimators_range):
+    best_score = -1
+    best_params = {}
+
+    for contamination in contamination_range:
+        for n_estimators in n_estimators_range:
+            model = IsolationForest(contamination=contamination, n_estimators=n_estimators, random_state=42)
+            predictions = model.fit_predict(X)
+
+            # Calculate silhouette score, ensuring at least two clusters
+            if len(set(predictions)) > 1:
+                score = silhouette_score(X, predictions)
+
+                if score > best_score:
+                    best_score = score
+                    best_params = {'contamination': contamination, 'n_estimators': n_estimators}
+
+    return best_params, best_score
+
+
+def evaluate_one_class_svm_params(X, nu_range, kernel_range):
+    best_score = -1
+    best_params = {}
+
+    for nu in nu_range:
+        for kernel in kernel_range:
+            model = OneClassSVM(nu=nu, kernel=kernel, gamma='auto')
+            predictions = model.fit_predict(X)
+
+            # Calculate silhouette score, ensuring at least two clusters
+            if len(set(predictions)) > 1:
+                score = silhouette_score(X, predictions)
+
+                if score > best_score:
+                    best_score = score
+                    best_params = {'nu': nu, 'kernel': kernel}
+
+    return best_params, best_score
+
+
+# Updated plot_results function
+def plot_results(df, final_anomaly_labels, timestamp_col='timestamp'):
+    feature_cols = [col for col in df.columns if col != timestamp_col and col != 'anomaly']
+
+    # Create subplots based on the number of features
+    num_features = len(feature_cols)
+    fig, axes = plt.subplots(nrows=num_features, ncols=1, figsize=(12, 4 * num_features), sharex=True)
+
+    if num_features == 1:
+        axes = [axes]  # If only one feature, make sure axes is iterable
+
+    # Plot each feature in a separate subplot
+    for i, col in enumerate(feature_cols):
+        axes[i].plot(df[timestamp_col], df[col], label=f'{col}', color='blue', alpha=0.5)
+
+        # Highlight anomalies
+        anomalies = df[final_anomaly_labels == -1]
+        axes[i].scatter(anomalies[timestamp_col], anomalies[col], color='red', label='Anomalies', marker='o', s=50)
+
+        axes[i].set_title(f'Anomaly Detection in {col}')
+        axes[i].set_ylabel('Feature Values')
+        axes[i].legend()
+
+    plt.xlabel('Timestamp')
+    plt.show()
+
+
+def dynamic_anomaly_detection(df, window_size=30, timestamp_col='timestamp'):
+    # Remove low variance columns
+    df_cleaned = remove_low_variance_columns(df, timestamp_col=timestamp_col)
+
+    # Ensure there are enough rows for windows
+    if len(df_cleaned) < window_size:
+        raise ValueError("DataFrame is too small for the specified window size.")
+
+    # Sort by timestamp
+    df_sorted = df_cleaned.sort_values(by=timestamp_col)
+
+    # Scaling features (excluding timestamp)
+    scaler = StandardScaler()
+    features = df_sorted.drop(columns=[timestamp_col])
+    scaled_features = scaler.fit_transform(features)
+
+    # Hyperparameter tuning for Isolation Forest
+    contamination_range = np.arange(0.01, 0.2, 0.01)
+    n_estimators_range = [50, 100, 150]
+    best_if_params, best_if_score = evaluate_isolation_forest_params(scaled_features, contamination_range,
+                                                                     n_estimators_range)
+    print(f"Best Isolation Forest Parameters: {best_if_params}, Best Silhouette Score: {best_if_score}")
+
+    # Hyperparameter tuning for One-Class SVM
+    nu_range = np.arange(0.01, 0.2, 0.01)
+    kernel_range = ['linear', 'rbf', 'poly']
+    best_ocsvm_params, best_ocsvm_score = evaluate_one_class_svm_params(scaled_features, nu_range, kernel_range)
+    print(f"Best One-Class SVM Parameters: {best_ocsvm_params}, Best Silhouette Score: {best_ocsvm_score}")
+
+    # Initialize anomaly labels
+    anomaly_labels_if = np.zeros(len(df_sorted))
+    anomaly_labels_ocsvm = np.zeros(len(df_sorted))
+
+    # Window-wise anomaly detection using Isolation Forest
+    for start in range(0, len(df_sorted) - window_size + 1):
+        window = scaled_features[start:start + window_size]
+        model_if = IsolationForest(contamination=best_if_params['contamination'],
+                                   n_estimators=best_if_params['n_estimators'], random_state=42)
+        predictions_if = model_if.fit_predict(window)  # Predictions are -1 (anomaly) or 1 (normal)
+        anomaly_labels_if[start:start + window_size] = predictions_if
+
+    # Full data anomaly detection using One-Class SVM
+    model_ocsvm = OneClassSVM(nu=best_ocsvm_params['nu'], kernel=best_ocsvm_params['kernel'], gamma='auto')
+    anomaly_labels_ocsvm = model_ocsvm.fit_predict(scaled_features)  # Predictions are -1 (anomaly) or 1 (normal)
+
+    # Combine results for final decision
+    final_anomaly_labels = np.where(anomaly_labels_if == -1, -1, anomaly_labels_ocsvm)
+
+    # Mark anomalies in the original DataFrame
+    df_sorted['anomaly'] = 0  # Initialize the anomaly column
+    df_sorted.loc[final_anomaly_labels == -1, 'anomaly'] = 1  # Mark anomalies with 1
+
+    print("Anomalies marked in the DataFrame.")
+
+    # Plot the results
+    plot_results(df_sorted, final_anomaly_labels, timestamp_col)
+
+    return final_anomaly_labels
+
+
+# Create a dummy DataFrame for testing with multiple features
+np.random.seed(42)
+timestamp = pd.date_range(start='2023-01-01', periods=2000, freq='T')
+data = {
+    'timestamp': timestamp,
+    'feature1': np.random.rand(2000),
+    #'feature2': np.random.rand(2000) * 10,
+}
+
+df = pd.DataFrame(data)
+
+# Run the anomaly detection
+final_anomaly_labels = dynamic_anomaly_detection(df, window_size=30)
+
+# Display the final anomaly labels
+print(f"Final Anomaly Labels: {final_anomaly_labels}")
