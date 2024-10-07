@@ -1,0 +1,168 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.ensemble import IsolationForest
+from sklearn.svm import OneClassSVM
+from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+
+def calculate_silhouette_score(data, labels):
+    """ Calculate silhouette score for the given data and labels """
+    if len(set(labels)) < 2:  # Check if there's more than one cluster
+        return -1  # Silhouette score is not defined for one cluster
+    return silhouette_score(data, labels)
+
+
+def tune_isolation_forest(data, n_estimators_list, contamination_list, max_iterations=10, tolerance=0.01):
+    """ Tune Isolation Forest parameters to maximize silhouette score """
+    best_score = -1
+    best_model = None
+    best_params = {}
+    iterations = 0
+    previous_score = None
+
+    while iterations < max_iterations:
+        iterations += 1
+        print(f"Iteration {iterations}/{max_iterations}")
+
+        for n_estimators in n_estimators_list:
+            for contamination in contamination_list:
+                model = IsolationForest(n_estimators=n_estimators, contamination=contamination, random_state=42)
+                labels = model.fit_predict(data)
+
+                score = calculate_silhouette_score(data, labels)
+                print(f"n_estimators: {n_estimators}, contamination: {contamination}, silhouette score: {score}")
+
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+                    best_params = {'n_estimators': n_estimators, 'contamination': contamination}
+
+        # Print current best score for debugging
+        print(f"Current best silhouette score: {best_score}")
+
+        # Check for convergence
+        if previous_score is not None:
+            if abs(best_score - previous_score) < tolerance:
+                print("Convergence reached; stopping tuning.")
+                break
+        previous_score = best_score
+
+    print(f"Best Silhouette Score: {best_score} with params: {best_params}")
+    return best_model
+
+
+def detect_anomalies(data, window_size, weight_if, weight_svm, max_iterations=10, tolerance=0.01):
+    """ Detect anomalies using Isolation Forest and One-Class SVM """
+    final_labels = np.zeros(data.shape[0])
+    silhouette_scores_if = []
+    silhouette_scores_svm = []
+
+    for i in range(0, len(data), window_size):
+        window = data[i:i + window_size]
+
+        # Tune Isolation Forest
+        isolation_forest = tune_isolation_forest(window, n_estimators_list=[100, 200],
+                                                 contamination_list=[0.01, 0.05, 0.1])
+
+        # Fit the tuned Isolation Forest model and get labels
+        if_labels = isolation_forest.fit_predict(window)
+        if_labels = np.where(if_labels == -1, 1, 0)  # Convert to binary labels
+
+        # Calculate silhouette score
+        if_silhouette = calculate_silhouette_score(window, if_labels)
+        silhouette_scores_if.append(if_silhouette)
+        print(f"Silhouette score for Isolation Forest: {if_silhouette}")
+
+        # Fit One-Class SVM
+        svm_model = OneClassSVM(gamma='auto', nu=0.1)
+        svm_labels = svm_model.fit_predict(window)
+        svm_labels = np.where(svm_labels == -1, 1, 0)  # Convert to binary labels
+
+        # Calculate silhouette score for SVM
+        svm_silhouette = calculate_silhouette_score(window, svm_labels)
+        silhouette_scores_svm.append(svm_silhouette)
+        print(f"Silhouette score for One-Class SVM: {svm_silhouette}")
+
+        # Combine the results using weighted scoring
+        combined_labels = (weight_if * if_labels + weight_svm * svm_labels) / (weight_if + weight_svm)
+        final_labels[i:i + window_size] = np.where(combined_labels > 0.5, 1, 0)
+
+    return final_labels, silhouette_scores_if, silhouette_scores_svm
+
+
+# Sample Data Generation (Replace with your actual data)
+data = np.random.rand(1000, 2)  # Replace with actual dataset
+data = StandardScaler().fit_transform(data)  # Standardize the data
+
+# Parameters
+window_size = 50
+weight_if = 0.8
+weight_svm = 0.2
+
+# Run anomaly detection
+final_labels, silhouette_scores_if, silhouette_scores_svm = detect_anomalies(data, window_size, weight_if, weight_svm)
+
+# Visualize results
+plt.figure(figsize=(15, 12))
+
+# Anomaly Detection Results
+plt.subplot(3, 2, 1)
+plt.scatter(data[:, 0], data[:, 1], c=final_labels, cmap='coolwarm', marker='o')
+plt.title('Anomaly Detection Results')
+plt.xlabel('Feature 1')
+plt.ylabel('Feature 2')
+plt.colorbar(label='Anomaly Label')
+
+# Silhouette Score Plot for Isolation Forest
+plt.subplot(3, 2, 2)
+plt.plot(silhouette_scores_if, marker='o', label='Isolation Forest', color='blue')
+plt.title('Silhouette Scores for Isolation Forest')
+plt.xlabel('Window Index')
+plt.ylabel('Silhouette Score')
+plt.axhline(y=0, color='r', linestyle='--', label='Zero Score')
+plt.legend()
+
+# Silhouette Score Plot for One-Class SVM
+plt.subplot(3, 2, 3)
+plt.plot(silhouette_scores_svm, marker='o', label='One-Class SVM', color='orange')
+plt.title('Silhouette Scores for One-Class SVM')
+plt.xlabel('Window Index')
+plt.ylabel('Silhouette Score')
+plt.axhline(y=0, color='r', linestyle='--', label='Zero Score')
+plt.legend()
+
+# Feature Distribution Histograms
+plt.subplot(3, 2, 4)
+plt.hist(data[:, 0], bins=30, alpha=0.5, label='Feature 1')
+plt.hist(data[:, 1], bins=30, alpha=0.5, label='Feature 2')
+plt.title('Feature Distribution')
+plt.xlabel('Feature Value')
+plt.ylabel('Frequency')
+plt.legend()
+
+# Boxplots for Anomalies
+plt.subplot(3, 2, 5)
+df = pd.DataFrame(data, columns=['Feature 1', 'Feature 2'])
+df['Anomaly'] = final_labels  # Add final_labels as a new column for hue
+sns.boxplot(data=df, orient='h', hue='Anomaly', x='Feature 1')  # Use 'Feature 1' for plotting
+plt.title('Boxplot of Features with Anomalies Highlighted')
+plt.xlabel('Feature Value')
+plt.ylabel('Features')
+
+# Feature vs Anomaly Mapping Line Chart
+plt.subplot(3, 2, 6)
+mean_feature_1 = df.groupby('Anomaly')['Feature 1'].mean()
+mean_feature_2 = df.groupby('Anomaly')['Feature 2'].mean()
+plt.plot(mean_feature_1.index, mean_feature_1.values, marker='o', label='Mean Feature 1', color='blue')
+plt.plot(mean_feature_2.index, mean_feature_2.values, marker='o', label='Mean Feature 2', color='orange')
+plt.title('Mean Feature Values vs Anomaly Labels')
+plt.xlabel('Anomaly Label (0: Normal, 1: Anomaly)')
+plt.ylabel('Mean Feature Value')
+plt.xticks(ticks=[0, 1], labels=['Normal', 'Anomaly'])
+plt.legend()
+
+plt.tight_layout()
+plt.show()
