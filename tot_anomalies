@@ -1,0 +1,8 @@
+# Count the anomalies in this window
+        total_anomalies += np.sum(final_labels[i:i + window_size])
+
+        print("Anomaly labels:", final_labels[i:i + window_size])
+
+    # Calculate the overall anomaly percentage
+    total_anomaly_percentage = (total_anomalies / len(data)) * 100
+    print(f"Overall anomaly percentage: {total_anomaly_percentage:.2f}%")
