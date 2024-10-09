@@ -1,0 +1,43 @@
+import pandas as pd
+
+def create_anomaly_dataframe(model, data, threshold, column_names):
+    """
+    Create a DataFrame with anomaly scores, categories, and print anomaly percentage.
+    
+    Args:
+        model: Trained Isolation Forest model.
+        data: DataFrame or array-like data to evaluate.
+        threshold: Contamination threshold for anomaly classification.
+        column_names: Column names for the data.
+    
+    Returns:
+        DataFrame with anomaly scores and anomaly categories.
+    """
+    # Get anomaly scores
+    anomaly_scores = model.decision_function(data)
+    
+    # Classify as 'Anomaly' or 'Normal' based on score
+    anomaly_category = ['Anomaly' if score < threshold else 'Normal' for score in anomaly_scores]
+    
+    # Create final DataFrame
+    final_df = pd.DataFrame(data, columns=column_names)
+    final_df['Anomaly_Score'] = anomaly_scores
+    final_df['Anomaly_Category'] = anomaly_category
+    
+    # Calculate percentage of anomalies
+    total_anomalies = anomaly_category.count('Anomaly')
+    total_data_points = len(data)
+    anomaly_percentage = (total_anomalies / total_data_points) * 100
+    
+    # Print total anomaly percentage
+    print(f"Total Anomaly Percentage: {anomaly_percentage:.2f}%")
+    
+    return final_df
+
+# Example usage (assuming model is trained and 'data' is the dataset):
+column_names = ['feature1', 'feature2', 'feature3']  # Replace with actual feature names
+threshold = -0.1  # Adjust threshold based on contamination rate or use contamination from model
+final_anomaly_df = create_anomaly_dataframe(isolation_forest, data, threshold, column_names)
+
+# Display the first few rows
+print(final_anomaly_df.head())
