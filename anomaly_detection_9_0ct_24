@@ -1,0 +1,311 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.ensemble import IsolationForest
+from sklearn.svm import OneClassSVM
+from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler
+
+
+def plot_anomaly_vs_normal_boxplot(data_scaled, final_labels):
+    """Plots boxplots of each feature for anomaly vs. normal data."""
+    num_features = data_scaled.shape[1]
+
+    # Convert the scaled data into a DataFrame for easier handling
+    df_scaled = pd.DataFrame(data_scaled, columns=[f'Feature {i + 1}' for i in range(num_features)])
+    df_scaled['Anomaly'] = final_labels  # Append the anomaly labels
+
+    # Create a boxplot for each feature, comparing anomalies (1) vs. normal data (0)
+    fig, axes = plt.subplots(num_features, 1, figsize=(10, num_features * 4), sharex=True)
+
+    # Handle the case where there is only one feature
+    if num_features == 1:
+        axes = [axes]
+
+    for i in range(num_features):
+        sns.boxplot(x='Anomaly', y=f'Feature {i + 1}', data=df_scaled, ax=axes[i], palette="Set1")
+        axes[i].set_title(f'Boxplot of Feature {i + 1} (Anomalies vs. Normal Data)')
+        axes[i].set_xlabel('Anomaly (1 = Anomaly, 0 = Normal)')
+        axes[i].set_ylabel(f'Feature {i + 1} Values')
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_anomaly_heatmap(data_scaled, final_labels):
+    """Plots a heatmap of the data with anomalies highlighted."""
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(data_scaled, cmap='coolwarm', cbar=True)
+
+    # Highlight anomalies with red dots
+    anomaly_indices = np.where(final_labels == 1)[0]
+    for anomaly_index in anomaly_indices:
+        plt.axvline(x=anomaly_index, color='red', lw=0.5)
+
+    plt.title('Heatmap of Features with Anomalies Highlighted')
+    plt.show()
+
+def plot_silhouette_score_trend(silhouette_scores_if, silhouette_scores_svm):
+    """Plots the silhouette score trends for Isolation Forest and One-Class SVM."""
+    plt.figure(figsize=(10, 6))
+    plt.plot(silhouette_scores_if, label='Isolation Forest', marker='o')
+    plt.plot(silhouette_scores_svm, label='One-Class SVM', marker='o')
+    plt.title('Silhouette Score Trend')
+    plt.xlabel('Window Index')
+    plt.ylabel('Silhouette Score')
+    plt.legend()
+    plt.show()
+
+def plot_anomaly_percentage_by_window(final_labels, window_size):
+    """Plots the percentage of anomalies detected in each window."""
+    num_windows = len(final_labels) // window_size
+    anomaly_percentage = []
+
+    for i in range(num_windows):
+        window_labels = final_labels[i * window_size:(i + 1) * window_size]
+        percentage = np.sum(window_labels) / len(window_labels) * 100
+        anomaly_percentage.append(percentage)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(num_windows), anomaly_percentage, marker='o', color='orange')
+    plt.title('Anomaly Percentage by Window')
+    plt.xlabel('Window Index')
+    plt.ylabel('Anomaly Percentage (%)')
+    plt.show()
+
+
+
+def dynamic_data_preprocessing(data, numeric_columns):
+    # Standardizing the numeric columns
+    scaler = StandardScaler()
+    data_scaled = scaler.fit_transform(data[numeric_columns])
+
+    return data_scaled
+
+
+def plot_dynamic_line_chart(data_scaled, final_labels, dates):
+    num_features = data_scaled.shape[1]
+
+    # Plot each feature separately
+    fig, axes = plt.subplots(num_features, 1, figsize=(10, 6), sharex=True)
+
+    # Handle the case where there is only one feature
+    if num_features == 1:
+        axes = [axes]
+
+    for i in range(num_features):
+        axes[i].plot(dates, data_scaled[:, i], label=f'Feature {i + 1}', color='blue')
+
+        # Extract anomaly points for this feature
+        anomaly_indices = np.where(final_labels == 1)[0]
+        axes[i].scatter(dates[anomaly_indices], data_scaled[anomaly_indices, i], color='red', label='Anomalies',
+                        marker='o')
+
+        axes[i].set_ylabel(f'Feature {i + 1}')
+        axes[i].legend()
+
+    plt.xlabel('Date')
+    plt.suptitle('Anomaly Detection Line Chart')
+    plt.show()
+
+def load_and_select_columns(file_path, columns, file_type='excel'):
+    """ Load data from file and select specified columns """
+    if file_type == 'excel':
+        data = pd.read_excel(file_path)
+    elif file_type == 'csv':
+        data = pd.read_csv(file_path)
+    else:
+        raise ValueError("Unsupported file type. Please use 'excel' or 'csv'.")
+
+    return data[columns]
+
+
+def calculate_silhouette_score(data, labels):
+    """ Calculate silhouette score for the given data and labels """
+    if len(set(labels)) < 2:  # Check if there's more than one cluster
+        return -1  # Silhouette score is not defined for one cluster
+    return silhouette_score(data, labels)
+
+
+def tune_isolation_forest(data, n_estimators_list, contamination_list, max_samples_percentage_range=None, max_iterations=10, tolerance=0.01):
+    """ Tune Isolation Forest parameters to maximize silhouette score """
+    best_score = -1
+    best_model = None
+    best_params = {}
+    iterations = 0
+    previous_score = None
+
+    if max_samples_percentage_range is None:
+        # Default to 100% of the dataset if no range is provided
+        max_samples_percentage_range = [0.3,0.5,0.7]
+
+    while iterations < max_iterations:
+        iterations += 1
+        print(f"Iteration {iterations}/{max_iterations}")
+
+        for n_estimators in n_estimators_list:
+            for contamination in contamination_list:
+                for max_samples_percentage in max_samples_percentage_range:
+                    # Compute the actual max_samples based on the percentage
+                    max_samples = int(len(data) * max_samples_percentage)
+
+                    # Ensure max_samples is at least 1
+                    max_samples = max(1, max_samples)
+
+                    model = IsolationForest(n_estimators=n_estimators, contamination=contamination,
+                                            max_samples=max_samples, random_state=42)
+                    labels = model.fit_predict(data)
+
+                    score = calculate_silhouette_score(data, labels)
+                    print(f"n_estimators: {n_estimators}, contamination: {contamination}, max_samples: {max_samples_percentage*100}%, silhouette score: {score}")
+
+                    if score > best_score:
+                        best_score = score
+                        best_model = model
+                        best_params = {'n_estimators': n_estimators, 'contamination': contamination, 'max_samples': max_samples_percentage}
+
+        # Print current best score for debugging
+        print(f"Current best silhouette score: {best_score}")
+
+        # Check for convergence
+        if previous_score is not None:
+            if abs(best_score - previous_score) < tolerance:
+                print("Convergence reached; stopping tuning.")
+                break
+        previous_score = best_score
+
+    # If no valid model was found, create a default one
+    if best_model is None:
+        print("No valid model found during tuning; using default Isolation Forest model.")
+        best_model = IsolationForest(random_state=42)
+        best_model.fit(data)
+
+    print(f"Best Silhouette Score: {best_score} with params: {best_params}")
+    return best_model
+
+
+def tune_one_class_svm(data, nu_list, gamma_list, max_iterations=10, tolerance=0.01):
+    """ Tune One-Class SVM parameters to maximize silhouette score """
+    best_score = -1
+    best_model = None
+    best_params = {}
+    iterations = 0
+    previous_score = None
+
+    while iterations < max_iterations:
+        iterations += 1
+        print(f"Iteration {iterations}/{max_iterations}")
+
+        for nu in nu_list:
+            for gamma in gamma_list:
+                model = OneClassSVM(nu=nu, gamma=gamma)
+                labels = model.fit_predict(data)
+
+                score = calculate_silhouette_score(data, labels)
+                print(f"nu: {nu}, gamma: {gamma}, silhouette score: {score}")
+
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+                    best_params = {'nu': nu, 'gamma': gamma}
+
+        # Print current best score for debugging
+        print(f"Current best silhouette score (SVM): {best_score}")
+
+        # Check for convergence
+        if previous_score is not None:
+            if abs(best_score - previous_score) < tolerance:
+                print("Convergence reached for One-Class SVM; stopping tuning.")
+                break
+        previous_score = best_score
+
+    print(f"Best Silhouette Score (SVM): {best_score} with params: {best_params}")
+    return best_model
+
+
+def detect_anomalies(data, window_size, weight_if, weight_svm, max_iterations=10, tolerance=0.01):
+    """ Detect anomalies using Isolation Forest and One-Class SVM """
+    final_labels = np.zeros(data.shape[0])
+    silhouette_scores_if = []
+    silhouette_scores_svm = []
+
+    for i in range(0, len(data), window_size):
+        window = data[i:i + window_size]
+
+        # Tune Isolation Forest with percentage range for max_samples
+        isolation_forest = tune_isolation_forest(window,
+                                                 n_estimators_list=[100, 200],
+                                                 contamination_list=[0.01, 0.05, 0.1,0.15],
+                                                 max_samples_percentage_range=[0.3,0.5,0.7])
+
+        # Fit the tuned Isolation Forest model and get labels
+        if isolation_forest is not None:  # Ensure the model is not None
+            if_labels = isolation_forest.fit_predict(window)
+            if_labels = np.where(if_labels == -1, 1, 0)  # Convert to binary labels
+        else:
+            print("Error: Isolation Forest model is None")
+            continue  # Skip this window if no valid model was found
+
+        # Calculate silhouette score for Isolation Forest
+        if_silhouette = calculate_silhouette_score(window, if_labels)
+        silhouette_scores_if.append(if_silhouette)
+        print(f"Silhouette score for Isolation Forest: {if_silhouette}")
+
+        # Tune One-Class SVM
+        svm_model = tune_one_class_svm(window, nu_list=[0.05, 0.1, 0.2], gamma_list=['auto', 0.01, 0.1])
+
+        # Fit the tuned SVM model and get labels
+        svm_labels = svm_model.fit_predict(window)
+        svm_labels = np.where(svm_labels == -1, 1, 0)  # Convert to binary labels
+
+        # Calculate silhouette score for One-Class SVM
+        svm_silhouette = calculate_silhouette_score(window, svm_labels)
+        silhouette_scores_svm.append(svm_silhouette)
+        print(f"Silhouette score for One-Class SVM: {svm_silhouette}")
+
+        # Combine the results using weighted scoring
+        combined_labels = (weight_if * if_labels + weight_svm * svm_labels) / (weight_if + weight_svm)
+        final_labels[i:i + window_size] = np.where(combined_labels > 0.5, 1, 0)
+        print("Anomaly labels:", final_labels)
+    return final_labels, silhouette_scores_if, silhouette_scores_svm
+
+
+
+# Load data from your Excel file and select 'Value' and 'Date' columns
+data = load_and_select_columns('C:/Users/Arvi/PycharmProjects/pythonProject1/Conveyor blower 1D.xlsx',
+                               columns=['Value', 'Date'],
+                               file_type='excel')
+#data=data.iloc[:300]
+# Ensure the 'Date' column is in datetime format
+date_column = data.select_dtypes(include=['datetime64']).columns.tolist()
+numeric_columns = data.select_dtypes(include=[np.number]).columns.tolist()
+
+# Convert the 'Date' column to datetime format if needed
+data[date_column[0]] = pd.to_datetime(data[date_column[0]])
+
+# Extract all numeric columns dynamically, excluding the date column
+#value_columns = data.select_dtypes(include=['float64', 'int64']).columns.tolist()
+
+
+# Preprocess the numeric data
+data_scaled = dynamic_data_preprocessing(data, numeric_columns)
+# Extract date column for plotting
+dates = data[date_column[0]].values
+# Print scaled data for verification
+print("Numeric features after scaling:")
+print(data_scaled)
+
+# Parameters
+window_size = 150
+weight_if = 0.6
+weight_svm = 0.4
+
+# Run anomaly detection
+final_labels, silhouette_scores_if, silhouette_scores_svm = detect_anomalies(data_scaled, window_size, weight_if, weight_svm)
+
+plot_dynamic_line_chart(data_scaled, final_labels, dates)
+plot_anomaly_heatmap(data_scaled, final_labels)
+plot_silhouette_score_trend(silhouette_scores_if, silhouette_scores_svm)
+plot_anomaly_percentage_by_window(final_labels, window_size)
+plot_anomaly_vs_normal_boxplot(data_scaled, final_labels)
