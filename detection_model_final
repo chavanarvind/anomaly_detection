@@ -1,0 +1,124 @@
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import IsolationForest
+from sklearn.svm import OneClassSVM
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+
+def dynamic_data_preprocessing(data, numeric_columns):
+    """Standardizing the numeric columns."""
+    scaler = StandardScaler()
+    data_scaled = scaler.fit_transform(data[numeric_columns])
+    return data_scaled
+
+def tune_isolation_forest(data, n_estimators_list, contamination_list, max_samples_percentage_range=None):
+    """Tune Isolation Forest parameters."""
+    best_score = -1
+    best_model = None
+    best_params = {}
+
+    if max_samples_percentage_range is None:
+        max_samples_percentage_range = [0.5]
+
+    for n_estimators in n_estimators_list:
+        for contamination in contamination_list:
+            for max_samples_percentage in max_samples_percentage_range:
+                max_samples = int(len(data) * max_samples_percentage)
+                max_samples = max(1, max_samples)
+
+                model = IsolationForest(n_estimators=n_estimators, contamination=contamination,
+                                        max_samples=max_samples, random_state=42)
+                labels = model.fit_predict(data)
+                score = sum(labels == -1)
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+                    best_params = {'n_estimators': n_estimators, 'contamination': contamination,
+                                   'max_samples': max_samples_percentage}
+
+    return best_model
+
+def tune_one_class_svm(data, nu_list, gamma_list):
+    """Tune One-Class SVM parameters."""
+    best_score = -1
+    best_model = None
+    best_params = {}
+
+    for nu in nu_list:
+        for gamma in gamma_list:
+            model = OneClassSVM(nu=nu, gamma=gamma)
+            labels = model.fit_predict(data)
+            score = sum(labels == -1)
+            if score > best_score:
+                best_score = score
+                best_model = model
+                best_params = {'nu': nu, 'gamma': gamma}
+
+    return best_model
+
+def detect_anomalies(data, window_size, weight_if, weight_svm):
+    """Detect anomalies using Isolation Forest and One-Class SVM."""
+    final_labels = np.zeros(data.shape[0])
+
+    for i in range(0, len(data), window_size):
+        window = data[i:i + window_size]
+
+        # Tune Isolation Forest
+        isolation_forest = tune_isolation_forest(window, n_estimators_list=[100, 200],
+                                                 contamination_list=[0.05, 0.1],
+                                                 max_samples_percentage_range=[0.3, 0.5])
+        if_labels = isolation_forest.fit_predict(window)
+        if_labels = np.where(if_labels == -1, 1, 0)
+
+        # Tune One-Class SVM
+        svm_model = tune_one_class_svm(window, nu_list=[0.1, 0.2], gamma_list=['auto', 0.1])
+        svm_labels = svm_model.fit_predict(window)
+        svm_labels = np.where(svm_labels == -1, 1, 0)
+
+        # Combine the results using weighted scoring
+        combined_labels = (weight_if * if_labels + weight_svm * svm_labels) / (weight_if + weight_svm)
+        final_labels[i:i + window_size] = np.where(combined_labels > 0.5, 1, 0)
+
+    return final_labels
+
+# Load and preprocess data
+data = pd.read_csv('C:/Users/Arvi/PycharmProjects/pythonProject1/anomaly-free.csv', sep=';', parse_dates=['datetime'])
+date_column = data.select_dtypes(include=['datetime64']).columns.tolist()
+numeric_columns = data.select_dtypes(include=[np.number]).columns.tolist()
+
+data_scaled = dynamic_data_preprocessing(data, numeric_columns)
+
+# Run anomaly detection
+window_size = len(data)
+weight_if = 0.6
+weight_svm = 0.4
+final_labels = detect_anomalies(data_scaled, window_size, weight_if, weight_svm)
+
+# Add anomaly labels to data
+data['Anomaly'] = final_labels
+
+# Create a copy of original data for plotting
+data_original = data.copy()
+
+# Replace anomalies in the copy using interpolation
+data_interpolated = data.copy()
+data_interpolated[numeric_columns] = data_interpolated[numeric_columns].where(data_interpolated['Anomaly'] == 0, np.nan)
+data_interpolated[numeric_columns] = data_interpolated[numeric_columns].interpolate(method='linear')
+
+# Plot actual vs interpolated data for each numeric column
+for column in numeric_columns:
+    plt.figure(figsize=(14, 6))
+
+    # Plot original data (actual values)
+    plt.plot(data_original['datetime'], data_original[column], label=f'Actual {column}', color='blue', alpha=0.7)
+
+    # Plot interpolated data
+    plt.plot(data_interpolated['datetime'], data_interpolated[column], label=f'Interpolated {column}', color='orange', linestyle='--')
+
+    # Add labels and legend
+    plt.title(f"Actual vs Interpolated Data for {column}", fontsize=16)
+    plt.xlabel("Datetime", fontsize=12)
+    plt.ylabel(column, fontsize=12)
+    plt.legend()
+    plt.grid(True)
+    plt.show()
