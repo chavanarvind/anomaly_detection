@@ -81,8 +81,9 @@ def detect_anomalies(data, window_size, weight_if, weight_svm):
 
     return final_labels
 
-# Load and preprocess data
-data = pd.read_csv('C:/Users/Arvi/PycharmProjects/pythonProject1/anomaly-free.csv', sep=';', parse_dates=['datetime'])
+data=pd.read_csv('C:/Users/Arvi/Downloads/point_1_all_axes (1).csv',parse_dates=['date'])
+print(data)
+data['date'] = pd.to_datetime(data['date'], format='%Y-%m-%d %H-%M-%S', errors='coerce')
 date_column = data.select_dtypes(include=['datetime64']).columns.tolist()
 numeric_columns = data.select_dtypes(include=[np.number]).columns.tolist()
 
