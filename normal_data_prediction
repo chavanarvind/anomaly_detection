@@ -2,21 +2,15 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-# Load the CSV file
-data = pd.read_csv("your_file.csv")  # Replace with your actual CSV file path
+# Load your data
+data = pd.read_csv("your_file.csv")  # Replace with your file name
 
-# Ensure data is sorted by date
+# Ensure the data is sorted by date
 data['date'] = pd.to_datetime(data['date'])
 data = data.sort_values('date').reset_index(drop=True)
 
-# Extract only numerical columns for the model
+# Extract numerical columns for LSTM modeling
 numerical_data = data[['pointa', 'pointb', 'pointc']]
-
-# Scale the data (optional, depending on your data distribution)
-# You can use MinMaxScaler or StandardScaler if needed
-# from sklearn.preprocessing import MinMaxScaler
-# scaler = MinMaxScaler()
-# numerical_data = scaler.fit_transform(numerical_data)
 
 # Create lagged data
 n_lags = 3  # Number of timesteps to look back
@@ -47,26 +41,26 @@ model.compile(optimizer='adam', loss='mse')
 # Train the model
 model.fit(X_train, y_train, epochs=50, batch_size=32, validation_data=(X_test, y_test))
 
-# Forecast next 10 values
-last_sequence = X_test[-1]  # Start with the last sequence in test data
-n_predictions = 10  # Number of future values to predict
+# Forecast next 5 data points
+last_sequence = X_test[-1]  # Start with the last sequence from the test data
+n_predictions = 5  # Number of future points to predict
 predicted_values = []
 
 for _ in range(n_predictions):
-    # Reshape last_sequence for prediction (batch size = 1)
+    # Reshape `last_sequence` for prediction (batch size = 1)
     last_sequence = last_sequence.reshape(1, last_sequence.shape[0], last_sequence.shape[1])
     
     # Predict the next value
-    next_value = model.predict(last_sequence, verbose=0)
-    predicted_values.append(next_value[0])  # Store the prediction
+    next_value = model.predict(last_sequence, verbose=0)  # Shape: (1, features)
+    predicted_values.append(next_value[0])  # Append prediction to the list
     
-    # Update `last_sequence` by appending the new value and removing the oldest one
-    last_sequence = np.append(last_sequence[:, 1:, :], next_value.reshape(1, 1, -1), axis=1)
+    # Update `last_sequence` to roll forward
+    last_sequence = np.vstack([last_sequence[0, 1:], next_value])  # Shape: (n_lags, features)
 
-# Convert predictions to a DataFrame
+# Convert predictions to DataFrame
 predictions_df = pd.DataFrame(predicted_values, columns=['pointa', 'pointb', 'pointc'])
 
-# Optionally, add future dates to the predictions DataFrame
+# Add future dates to the predictions DataFrame
 last_date = data['date'].iloc[-1]
 future_dates = [last_date + pd.Timedelta(days=i) for i in range(1, n_predictions + 1)]
 predictions_df['date'] = future_dates
