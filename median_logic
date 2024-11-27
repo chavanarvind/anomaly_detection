@@ -1,0 +1,38 @@
+import numpy as np
+
+# Filter data where 'Anomaly' = 0
+filtered_data = merged_data[merged_data['Anomaly'] == 0]
+
+# List of numeric columns
+numeric_columns = ["point1_A", "point1_V", "point1_H"]
+
+# Calculate medians and standard deviations for each numeric column
+medians_list = [filtered_data[col].median() for col in numeric_columns]
+std_devs_list = [filtered_data[col].std() for col in numeric_columns]
+
+# Function to replace outliers with median using dynamic std dev
+def replace_outliers_with_median(column, median, std_dev, k=3):
+    # Calculate UCL and LCL
+    ucl = median + k * std_dev
+    lcl = median - k * std_dev
+    
+    # Replace outliers
+    column = np.where((column > ucl) | (column < lcl), median, column)
+    return column
+
+# Apply outlier replacement for each column
+for i, col in enumerate(numeric_columns):
+    merged_data[col] = replace_outliers_with_median(
+        merged_data[col], 
+        median=medians_list[i], 
+        std_dev=std_devs_list[i]
+    )
+
+# Save the cleaned dataset
+output_file = "cleaned_data_with_outliers_replaced.csv"
+merged_data.to_csv(output_file, index=False, date_format='%m/%d/%Y %I:%M:%S %p')
+
+# Print summary
+print("Medians of numeric columns (where Anomaly=0):", medians_list)
+print("Standard deviations of numeric columns (where Anomaly=0):", std_devs_list)
+print(f"Outlier replacement completed. Cleaned data saved to {output_file}.")
